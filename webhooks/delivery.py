@@ -44,8 +44,15 @@ RETRY_BACKOFF_SECONDS = 7
 
 
 def _timeout_for(delivery: Delivery) -> int:
-    """The delivery timeout for this merchant's tier."""
-    return DELIVERY_TIMEOUT_BY_TIER[delivery.payload["merchant_tier"]]
+    """The delivery timeout for this merchant's tier.
+
+    Absent or unrecognised tiers fall back to standard. The tier is written by the
+    producer that enqueued the delivery, and deliveries enqueued before that
+    producer learned to write it are still in the queue -- subscripting the payload
+    directly took the whole worker down on the first one of those it picked up.
+    """
+    tier = delivery.payload.get("merchant_tier", "standard")
+    return DELIVERY_TIMEOUT_BY_TIER.get(tier, DELIVERY_TIMEOUT_SECONDS)
 
 
 def deliver(delivery: Delivery) -> bool:

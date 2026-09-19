@@ -81,6 +81,22 @@ def simulate_acquirer_timeout() -> None:
         print(f"  settlement batch -> {exc}")
 
 
+def simulate_empty_settlement_batch() -> None:
+    """A merchant with nothing to settle. Ordinary, and must stay uneventful.
+
+    Kept here because "nothing happened" is the case arithmetic over a batch tends
+    to forget -- a totals or averages line added later divides by a count that is
+    zero exactly on the nights there is nothing to report.
+    """
+
+    class QuietAcquirer:
+        def submit(self, entries: list[dict], timeout: int) -> dict:
+            return {"accepted": 0, "batch_id": "sim-empty"}
+
+    ack = settlement.submit_batch(QuietAcquirer(), [])
+    print(f"  empty settlement batch -> {ack}")
+
+
 def main() -> int:
     observability.init()
     release = os.environ.get("SENTRY_RELEASE") or "(none)"
@@ -88,14 +104,33 @@ def main() -> int:
         print("SENTRY_DSN is not set -- running the paths, reporting nothing.")
     print(f"simulating incidents for release {release}")
 
-    simulate_dead_merchant_endpoint()
-    simulate_index_dead_letter()
-    simulate_acquirer_timeout()
+    # Each scenario is isolated. A scenario that raises something the instrumented
+    # code did not expect is exactly the interesting case -- it means a real bug,
+    # and it must be reported rather than aborting the scenarios after it. Without
+    # this, one regression silently costs the release every incident behind it.
+    scenarios = (
+        simulate_dead_merchant_endpoint,
+        simulate_index_dead_letter,
+        simulate_acquirer_timeout,
+        simulate_empty_settlement_batch,
+    )
+    failed = 0
+    for scenario in scenarios:
+        try:
+            scenario()
+        except Exception as exc:
+            failed += 1
+            print(f"  !! {scenario.__name__} raised {type(exc).__name__}: {exc}")
+            observability.capture_exception(exc, scenario=scenario.__name__)
 
     # The process is about to exit; without this the transport is torn down with
     # events still queued and the release looks clean.
     if observability.flush():
         print("flushed to Sentry")
+    # Zero regardless: an unhandled scenario is a finding to report, not a reason to
+    # fail the release job that just published the release those findings belong to.
+    if failed:
+        print(f"{failed} scenario(s) raised unexpectedly -- reported to Sentry")
     return 0
 
 

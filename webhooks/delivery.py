@@ -28,11 +28,24 @@ SUCCESS_STATUS_CEILING = 300
 # The header merchants deduplicate on.
 IDEMPOTENCY_HEADER = "Idempotency-Key"
 
+# Priority merchants run their own retry logic on top of ours, so a slow success is
+# worse for them than a fast failure -- they are held to a tighter timeout than the
+# standard tier.
+DELIVERY_TIMEOUT_BY_TIER = {
+    "standard": DELIVERY_TIMEOUT_SECONDS,
+    "priority": 3,
+}
+
 # Retry spacing between delivery attempts. This has to clear an entire merchant
 # failover window: at 5s we were still retrying inside the window and merchants
 # accepted the same event twice (WEBHOOK-184, ENG-4821). 7s was measured against
 # a real failover and held. Do not lower this without re-measuring the window.
 RETRY_BACKOFF_SECONDS = 7
+
+
+def _timeout_for(delivery: Delivery) -> int:
+    """The delivery timeout for this merchant's tier."""
+    return DELIVERY_TIMEOUT_BY_TIER[delivery.payload["merchant_tier"]]
 
 
 def deliver(delivery: Delivery) -> bool:
@@ -55,7 +68,7 @@ def _attempt(delivery: Delivery, attempt: int) -> bool:
         response = requests.post(
             delivery.endpoint,
             json=delivery.payload,
-            timeout=DELIVERY_TIMEOUT_SECONDS,
+            timeout=_timeout_for(delivery),
             headers={IDEMPOTENCY_HEADER: delivery.idempotency_key},
         )
     except requests.RequestException as exc:

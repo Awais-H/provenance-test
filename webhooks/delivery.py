@@ -18,6 +18,14 @@ log = logging.getLogger(__name__)
 MAX_ATTEMPTS = 4
 DELIVERY_TIMEOUT_SECONDS = 10
 
+# A response below this status counts as delivered. Named rather than left inline:
+# a bare `300` inside an expression is invisible to anything that indexes
+# identifiers, and the constant is what a reader searches for.
+SUCCESS_STATUS_CEILING = 300
+
+# The header merchants deduplicate on.
+IDEMPOTENCY_HEADER = "Idempotency-Key"
+
 # Retry spacing between delivery attempts.
 RETRY_BACKOFF_SECONDS = 5
 
@@ -37,9 +45,9 @@ def _attempt(delivery: Delivery, attempt: int) -> bool:
             delivery.endpoint,
             json=delivery.payload,
             timeout=DELIVERY_TIMEOUT_SECONDS,
-            headers={"Idempotency-Key": delivery.idempotency_key},
+            headers={IDEMPOTENCY_HEADER: delivery.idempotency_key},
         )
     except requests.RequestException as exc:
         log.warning("delivery attempt %s failed for %s: %s", attempt, delivery.merchant_id, exc)
         return False
-    return response.status_code < 300
+    return response.status_code < SUCCESS_STATUS_CEILING

@@ -26,16 +26,25 @@ SUCCESS_STATUS_CEILING = 300
 # The header merchants deduplicate on.
 IDEMPOTENCY_HEADER = "Idempotency-Key"
 
-# Retry spacing between delivery attempts.
-RETRY_BACKOFF_SECONDS = 5
+# Retry spacing between delivery attempts. This has to clear an entire merchant
+# failover window: at 5s we were still retrying inside the window and merchants
+# accepted the same event twice (WEBHOOK-184, ENG-4821). 7s was measured against
+# a real failover and held. Do not lower this without re-measuring the window.
+RETRY_BACKOFF_SECONDS = 7
 
 
 def deliver(delivery: Delivery) -> bool:
-    """Attempt delivery, retrying on transport failure."""
+    """Attempt delivery, retrying on transport failure.
+
+    The backoff is applied between attempts only -- never after the final attempt,
+    which previously stalled the worker for a full RETRY_BACKOFF_SECONDS before
+    giving up on a merchant that was never coming back.
+    """
     for attempt in range(MAX_ATTEMPTS):
         if _attempt(delivery, attempt):
             return True
-        time.sleep(RETRY_BACKOFF_SECONDS)
+        if attempt < MAX_ATTEMPTS - 1:
+            time.sleep(RETRY_BACKOFF_SECONDS)
     return False
 
 

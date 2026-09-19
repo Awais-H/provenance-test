@@ -32,7 +32,13 @@ def average_entry_cents(entries: list[dict]) -> int:
     Reported alongside the count because the count alone does not distinguish a
     thousand small card payments from a thousand large wire settlements, and the
     acquirer's acknowledgement latency tracks value far more closely than volume.
+
+    An empty batch averages zero rather than raising. A merchant with nothing to
+    settle is an ordinary night, not an error -- and this is reached from a log
+    line, so raising here failed a submission that had nothing wrong with it.
     """
+    if not entries:
+        return 0
     return batch_total_cents(entries) // len(entries)
 
 

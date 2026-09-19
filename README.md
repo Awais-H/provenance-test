@@ -63,7 +63,16 @@ SENTRY_DSN=<your dsn> SENTRY_RELEASE=$(git rev-parse HEAD) \
 ```
 
 Omit `SENTRY_DSN` and the same paths run with nothing reported, which is the useful
-way to check the script still works after changing the code it exercises.
+way to check the script still works after changing the code it exercises. `.env` is
+read too, if you copy `.env.example` to it.
+
+**Do not point a local run at the real DSN before CI has run at least once.** An
+issue's `firstRelease` is fixed the first time Sentry sees it and is never
+recalculated, so a local run claims all three issues for whatever release your
+working copy is on. CI then emits them again under the merge commit SHA, but
+`firstRelease` still points at your laptop -- and Provenance reports the PR as having
+caused no incidents, with no error to explain why. Recovery: delete the issues in
+Sentry and re-run the workflow.
 
 ### A caveat worth stating
 

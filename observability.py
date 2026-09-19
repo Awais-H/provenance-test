@@ -19,8 +19,24 @@ places that have to agree are the `release` input in the workflow and
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 _initialised = False
+
+
+def _load_dotenv() -> None:
+    """Read a local .env, if there is one and python-dotenv is installed.
+
+    Anchored to this file rather than the cwd, so running the simulator from a
+    subdirectory still finds it. Never overrides a variable that is already set,
+    which is what keeps CI correct: the workflow's SENTRY_RELEASE must win over a
+    stale SHA someone left in a local .env.
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
 
 def init() -> None:
@@ -28,6 +44,7 @@ def init() -> None:
     global _initialised
     if _initialised:
         return
+    _load_dotenv()
     dsn = os.environ.get("SENTRY_DSN", "").strip()
     if not dsn:
         return

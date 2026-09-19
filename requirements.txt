@@ -3,3 +3,7 @@ requests
 # observability.py uses to detect an SDK a host application initialised instead of
 # us, needs only 2.0.
 sentry-sdk>=2.35
+
+# Optional: lets observability.py read a local .env. CI passes real env vars, so
+# nothing breaks if this is absent -- the import is guarded.
+python-dotenv

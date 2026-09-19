@@ -12,6 +12,8 @@ import logging
 import random
 import time
 
+import observability
+
 log = logging.getLogger(__name__)
 
 INDEX_RETRY_ATTEMPTS = 3
@@ -34,4 +36,12 @@ def index_batch(client, documents: list[dict]) -> list[dict]:
         log.warning("index attempt %s left %s documents failing", attempt, len(failed))
         pending = failed
         time.sleep(backoff_delay(attempt))
+    if pending:
+        # Best-effort indexing means the caller is entitled to ignore the return
+        # value, and callers do. Without this, a batch silently dropping half its
+        # documents every night produces no signal anywhere.
+        observability.capture_message(
+            f"index batch dropped {len(pending)} documents to the dead-letter queue",
+            document_count=len(pending),
+        )
     return pending

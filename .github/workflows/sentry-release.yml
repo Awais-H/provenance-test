@@ -1,0 +1,66 @@
+# One Sentry release per commit that lands on main -- which, given this repo merges
+# every PR with a merge commit, means one release per merged PR.
+#
+# The whole point is the identifier. `getsentry/action-release` names the release
+# after `github.sha`, and for a merge commit that is the exact string GitHub reports
+# as the PR's `merge_commit_sha`. Provenance reads the PR from GitHub, takes that
+# SHA, and asks Sentry for `firstRelease:<sha>`. No heuristic, no searching issue
+# titles for "#4" -- both systems agree on the identifier by construction.
+#
+# `set_commits: auto` additionally attaches the PR's commits to the release, which
+# is what powers suspect commits and PR comments in the Sentry UI. That needs the
+# Sentry GitHub integration installed on this repo; see README.md, "Sentry".
+
+name: Sentry release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Releases are cumulative and ordered; two of them racing produces a release whose
+  # commit range is wrong. Queue instead of cancelling -- a skipped release is a PR
+  # whose incidents Provenance can never find.
+  group: sentry-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # action-release walks back to the previous release to work out this
+          # release's commit range. The default depth of 1 has no history to walk
+          # and the step fails.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Create the Sentry release and attach this PR's commits
+        uses: getsentry/action-release@v3
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        with:
+          # `release` is left at its default of github.sha on purpose. Overriding it
+          # with a tag or semver breaks the join described at the top of this file.
+          environment: production
+          set_commits: auto
+
+      - name: Emit this release's incidents
+        # Runs after the release exists, so no event references a release Sentry has
+        # not been told about yet. See scripts/simulate_incidents.py for why a
+        # library with no deployment needs this at all.
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_RELEASE: ${{ github.sha }}
+          SENTRY_ENVIRONMENT: production
+        run: python scripts/simulate_incidents.py

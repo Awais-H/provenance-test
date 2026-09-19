@@ -11,6 +11,8 @@ import time
 
 import requests
 
+import observability
+
 from .types import Delivery
 
 log = logging.getLogger(__name__)
@@ -58,5 +60,14 @@ def _attempt(delivery: Delivery, attempt: int) -> bool:
         )
     except requests.RequestException as exc:
         log.warning("delivery attempt %s failed for %s: %s", attempt, delivery.merchant_id, exc)
+        # Reported as well as logged. This is the failure that motivated
+        # RETRY_BACKOFF_SECONDS, and it is invisible above this frame -- `deliver`
+        # returns a bool, so a merchant that is down for every attempt looks
+        # identical to one that simply declined. The log line lives on whichever
+        # worker happened to pick the delivery up; the Sentry issue is attached to
+        # the release, and through it to the PR that shipped this backoff.
+        observability.capture_exception(
+            exc, merchant_id=delivery.merchant_id, attempt=attempt,
+        )
         return False
     return response.status_code < SUCCESS_STATUS_CEILING

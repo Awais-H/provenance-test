@@ -21,11 +21,30 @@ SETTLEMENT_TIMEOUT_SECONDS = 90
 MAX_BATCH_ENTRIES = 10000
 
 
+def batch_total_cents(entries: list[dict]) -> int:
+    """Total value of a batch, in cents."""
+    return sum(e["amount_cents"] for e in entries)
+
+
+def average_entry_cents(entries: list[dict]) -> int:
+    """Mean entry value, in cents.
+
+    Reported alongside the count because the count alone does not distinguish a
+    thousand small card payments from a thousand large wire settlements, and the
+    acquirer's acknowledgement latency tracks value far more closely than volume.
+    """
+    return batch_total_cents(entries) // len(entries)
+
+
 def submit_batch(acquirer, entries: list[dict]) -> dict:
     """Submit one settlement batch and return the acquirer acknowledgement."""
     if len(entries) > MAX_BATCH_ENTRIES:
         raise ValueError(f"batch of {len(entries)} exceeds {MAX_BATCH_ENTRIES}")
-    log.info("submitting settlement batch of %s entries", len(entries))
+    log.info(
+        "submitting settlement batch of %s entries, avg %s cents",
+        len(entries),
+        average_entry_cents(entries),
+    )
     try:
         return acquirer.submit(entries, timeout=SETTLEMENT_TIMEOUT_SECONDS)
     except Exception as exc:

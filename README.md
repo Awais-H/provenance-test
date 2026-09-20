@@ -52,7 +52,7 @@ with scopes `project:releases` and `org:read`. `project:releases` is what
 
 **5. Trigger it.** Merge anything, or run the workflow by hand from the *Actions* tab
 (`workflow_dispatch`). A green run leaves one new release in Sentry with that PR's
-commits attached, and three issues whose `firstRelease` is that release.
+commits attached, and one issue whose `firstRelease` is that release.
 
 ### Running it locally
 
@@ -76,8 +76,8 @@ Sentry and re-run the workflow.
 
 ### A caveat worth stating
 
-`scripts/simulate_incidents.py` induces the failures it reports. They are real events
-from real instrumentation with real stack traces, but they are not observed
-production traffic — this library has no deployment. Issue *counts* here mean
+`scripts/simulate_incidents.py` and anything under `simulations/` induce the failures
+they report. They are real events from real instrumentation with real stack traces,
+but they are not observed production traffic — this library has no deployment. Issue *counts* here mean
 nothing. The issue-to-release-to-PR *linkage* is the part that is real, and that is
 the part Provenance consumes.

@@ -3,9 +3,13 @@
 acme-payments is a library with no service to deploy, so nothing would ever throw in
 production and Sentry would stay empty -- and an empty error tracker teaches
 Provenance nothing. This script stands in for the traffic a real deployment would
-have: it exercises each instrumented failure path once, against fake collaborators,
-so every merge produces a small, stable set of issues whose `firstRelease` is that
-merge's commit SHA.
+have, deliberately narrowly: one failing path, against fake collaborators, so every
+merge produces one issue rather than a list that buries the one being demonstrated.
+Its `firstRelease` is that merge's commit SHA.
+
+Scenarios that only added volume -- a dead-lettered index batch, an acquirer
+timeout -- were removed for that reason. A path worth reporting gets its own file
+under simulations/, where it is named and can be read on its own.
 
 These are simulated incidents. They are real Sentry events, reported by the real
 instrumentation in the real modules, with real stack traces -- but the failures are
@@ -26,7 +30,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import observability  # noqa: E402
 from payments import settlement  # noqa: E402
-from search import indexer  # noqa: E402
 from webhooks import delivery  # noqa: E402
 from webhooks.types import Delivery  # noqa: E402
 
@@ -50,35 +53,6 @@ def simulate_dead_merchant_endpoint() -> None:
     with mock.patch.object(delivery.time, "sleep"):
         delivered = delivery.deliver(target)
     print(f"  webhook delivery -> delivered={delivered}")
-
-
-def simulate_index_dead_letter() -> None:
-    """A bulk client that rejects everything, so the batch dead-letters in full."""
-
-    class RejectingClient:
-        def bulk_index(self, documents: list[dict]) -> list[dict]:
-            return list(documents)
-
-    documents = [{"id": f"merchant-{n}", "name": f"Merchant {n}"} for n in range(12)]
-    with mock.patch.object(indexer.time, "sleep"):
-        dropped = indexer.index_batch(RejectingClient(), documents)
-    print(f"  index batch -> dropped={len(dropped)}")
-
-
-def simulate_acquirer_timeout() -> None:
-    """The acquirer never acknowledges -- the case SETTLEMENT_TIMEOUT_SECONDS exists for."""
-
-    class TimingOutAcquirer:
-        def submit(self, entries: list[dict], timeout: int) -> dict:
-            raise TimeoutError(
-                f"acquirer did not acknowledge {len(entries)} entries within {timeout}s"
-            )
-
-    entries = [{"merchant_id": "merchant_3902", "amount_cents": 250_000}] * 40
-    try:
-        settlement.submit_batch(TimingOutAcquirer(), entries)
-    except TimeoutError as exc:
-        print(f"  settlement batch -> {exc}")
 
 
 def simulate_empty_settlement_batch() -> None:
@@ -110,8 +84,6 @@ def main() -> int:
     # this, one regression silently costs the release every incident behind it.
     scenarios = (
         simulate_dead_merchant_endpoint,
-        simulate_index_dead_letter,
-        simulate_acquirer_timeout,
         simulate_empty_settlement_batch,
     )
     failed = 0

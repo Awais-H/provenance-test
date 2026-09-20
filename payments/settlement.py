@@ -18,6 +18,15 @@ log = logging.getLogger(__name__)
 # and settling twice on resubmit. See PR #3902.
 SETTLEMENT_TIMEOUT_SECONDS = 90
 
+# The acquirer's cap, per merchant per settlement *date* -- not per submission. An
+# oversized batch therefore cannot be split across two same-day submissions: the
+# second comes back as DUPLICATE_INSTRUCTION once the first has settled, and the
+# merchant is paid for part of its night with no error anywhere that says so. That
+# was tried in 2024 and is what this limit exists to prevent.
+#
+# So a batch over the cap fails here, loudly, and its overflow goes to the next
+# settlement date via submit_with_overflow. A failed job is re-run in the morning;
+# a half-settled merchant is a reconciliation break and a support case.
 MAX_BATCH_ENTRIES = 10000
 
 
@@ -42,8 +51,14 @@ def average_entry_cents(entries: list[dict]) -> int:
     return batch_total_cents(entries) // len(entries)
 
 
-def _submit_one(acquirer, entries: list[dict]) -> dict:
-    """Submit a single acquirer submission and return its acknowledgement."""
+def submit_batch(acquirer, entries: list[dict]) -> dict:
+    """Submit one settlement batch and return the acquirer acknowledgement.
+
+    Raises on a batch over MAX_BATCH_ENTRIES rather than splitting it; callers
+    settling a merchant that size want submit_with_overflow.
+    """
+    if len(entries) > MAX_BATCH_ENTRIES:
+        raise ValueError(f"batch of {len(entries)} exceeds {MAX_BATCH_ENTRIES}")
     log.info(
         "submitting settlement batch of %s entries, avg %s cents",
         len(entries),
@@ -61,22 +76,24 @@ def _submit_one(acquirer, entries: list[dict]) -> dict:
         raise
 
 
-def submit_batch(acquirer, entries: list[dict]) -> dict:
-    """Submit one settlement batch and return the acquirer acknowledgement.
+def submit_with_overflow(acquirer, entries: list[dict]) -> tuple[dict, list[dict]]:
+    """Settle what fits today and hand back what does not.
 
-    A batch larger than MAX_BATCH_ENTRIES is sliced into submissions of that size
-    and sent in order, then acknowledged as one. The nightly runner used to raise on
-    these and take the whole merchant down with it, which left the batch unsettled
-    and needed a hand-run to clear.
+    Returns the acknowledgement for this settlement date and the entries that did
+    not fit, for the caller to carry into the next one. The overflow is returned
+    rather than submitted because the cap is per settlement date: the remainder is
+    only settleable once the date has rolled, and submitting it now is the duplicate
+    MAX_BATCH_ENTRIES describes.
     """
-    if len(entries) <= MAX_BATCH_ENTRIES:
-        return _submit_one(acquirer, entries)
-
-    acks = [
-        _submit_one(acquirer, entries[start : start + MAX_BATCH_ENTRIES])
-        for start in range(0, len(entries), MAX_BATCH_ENTRIES)
-    ]
-    return {
-        "accepted": sum(ack.get("accepted", 0) for ack in acks),
-        "batch_ids": [ack.get("batch_id") for ack in acks],
-    }
+    today, overflow = entries[:MAX_BATCH_ENTRIES], entries[MAX_BATCH_ENTRIES:]
+    if overflow:
+        # Warned rather than captured as an error: a deferral is the designed
+        # outcome for a merchant this size, not a failure. It is loud enough to
+        # notice a merchant deferring every night, which would mean their daily
+        # volume has outgrown the cap and needs the acquirer, not a code change.
+        log.warning(
+            "deferring %s of %s entries to the next settlement date",
+            len(overflow),
+            len(entries),
+        )
+    return submit_batch(acquirer, today), overflow

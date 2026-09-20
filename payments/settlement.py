@@ -42,10 +42,8 @@ def average_entry_cents(entries: list[dict]) -> int:
     return batch_total_cents(entries) // len(entries)
 
 
-def submit_batch(acquirer, entries: list[dict]) -> dict:
-    """Submit one settlement batch and return the acquirer acknowledgement."""
-    if len(entries) > MAX_BATCH_ENTRIES:
-        raise ValueError(f"batch of {len(entries)} exceeds {MAX_BATCH_ENTRIES}")
+def _submit_one(acquirer, entries: list[dict]) -> dict:
+    """Submit a single acquirer submission and return its acknowledgement."""
     log.info(
         "submitting settlement batch of %s entries, avg %s cents",
         len(entries),
@@ -61,3 +59,24 @@ def submit_batch(acquirer, entries: list[dict]) -> dict:
         # SETTLEMENT_TIMEOUT_SECONDS to 90.
         observability.capture_exception(exc, entry_count=len(entries))
         raise
+
+
+def submit_batch(acquirer, entries: list[dict]) -> dict:
+    """Submit one settlement batch and return the acquirer acknowledgement.
+
+    A batch larger than MAX_BATCH_ENTRIES is sliced into submissions of that size
+    and sent in order, then acknowledged as one. The nightly runner used to raise on
+    these and take the whole merchant down with it, which left the batch unsettled
+    and needed a hand-run to clear.
+    """
+    if len(entries) <= MAX_BATCH_ENTRIES:
+        return _submit_one(acquirer, entries)
+
+    acks = [
+        _submit_one(acquirer, entries[start : start + MAX_BATCH_ENTRIES])
+        for start in range(0, len(entries), MAX_BATCH_ENTRIES)
+    ]
+    return {
+        "accepted": sum(ack.get("accepted", 0) for ack in acks),
+        "batch_ids": [ack.get("batch_id") for ack in acks],
+    }

@@ -64,3 +64,13 @@ jobs:
           SENTRY_RELEASE: ${{ github.sha }}
           SENTRY_ENVIRONMENT: production
         run: python scripts/simulate_incidents.py
+
+      - name: Emit the oversized settlement batch incidents
+        # The path submit_batch now chunks. Kept as its own step against the same
+        # release, so the traffic this change opens is visible as its own file
+        # rather than folded into the pre-existing simulator.
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SENTRY_RELEASE: ${{ github.sha }}
+          SENTRY_ENVIRONMENT: production
+        run: python simulations/oversized_settlement_batch.py

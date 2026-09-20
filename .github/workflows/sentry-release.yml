@@ -65,10 +65,10 @@ jobs:
           SENTRY_ENVIRONMENT: production
         run: python scripts/simulate_incidents.py
 
-      - name: Emit the oversized settlement batch incidents
-        # The path submit_batch now chunks. Kept as its own step against the same
-        # release, so the traffic this change opens is visible as its own file
-        # rather than folded into the pre-existing simulator.
+      - name: Run the oversized settlement batch simulation
+        # The path over MAX_BATCH_ENTRIES, which settles across two dates rather
+        # than two same-day submissions. Unlike the step above, this one is meant
+        # to report nothing: a new issue from this step is the deferral breaking.
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_RELEASE: ${{ github.sha }}
